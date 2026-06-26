@@ -1,0 +1,19 @@
+{
+  "name": "ออเดอร์เหมียว — จัดการออเดอร์อาหาร",
+  "short_name": "ออเดอร์เหมียว",
+  "description": "ระบบสั่งและจัดการออเดอร์อาหาร ธีมแมวพาสเทล",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fdf7fb",
+  "theme_color": "#f3a5b8",
+  "lang": "th",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "หลังบ้าน", "short_name": "หลังบ้าน", "url": "/admin.html" }
+  ]
+}

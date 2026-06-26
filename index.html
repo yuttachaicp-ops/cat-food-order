@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>สั่งอาหาร 🐱</title>
 <link rel="stylesheet" href="style.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#f3a5b8">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ออเดอร์เหมียว">
 </head>
 <body>
 <header>
@@ -142,6 +148,7 @@ function zoom(src){const b=document.createElement('div'); b.className='lightbox'
 
 load();
 setInterval(load, 5000); // sync อัตโนมัติทุก 5 วิ
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }
 </script>
 </body>
 </html>
