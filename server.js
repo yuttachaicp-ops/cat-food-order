@@ -3,13 +3,14 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 const DATA_FILE = path.join(DATA_DIR, 'data.json');
 
-app.use(express.json({ limit: '8mb' })); // เผื่อรูป base64
+app.use(express.json({ limit: '8mb', verify: (req, res, buf) => { req.rawBody = buf; } })); // เผื่อรูป base64 + เก็บ raw body ไว้ตรวจลายเซ็น LINE
 
 // กันไม่ให้เข้าถึงไฟล์ภายในเซิร์ฟเวอร์ผ่าน URL
 const BLOCK = new Set(['/server.js', '/package.json', '/package-lock.json', '/data.json', '/.gitignore', '/README.md', '/DEPLOY.md']);
@@ -20,12 +21,12 @@ app.use((req, res, next) => {
 app.use(express.static(__dirname));
 
 // ---------- storage ----------
-let db = { shops: [], orders: [] };
+let db = { shops: [], orders: [], lineTarget: '' };
 function loadDb() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const d = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      db = { shops: d.shops || [], orders: d.orders || [] };
+      db = { shops: d.shops || [], orders: d.orders || [], lineTarget: d.lineTarget || '' };
     }
   } catch (e) { console.error('โหลดข้อมูลไม่สำเร็จ:', e.message); }
 }
@@ -145,6 +146,82 @@ app.delete('/api/shops/:id/menu/:mid', (req, res) => {
   s.menu = s.menu.filter(m => m.id !== req.params.mid);
   saveDb();
   res.json({ ok: true });
+});
+
+// ===================== LINE (Messaging API) =====================
+// ตั้งค่าใน Render: LINE_TOKEN = Channel access token, (ไม่บังคับ) LINE_SECRET = Channel secret
+const LINE_PUSH = 'https://api.line.me/v2/bot/message/push';
+const LINE_REPLY = 'https://api.line.me/v2/bot/message/reply';
+
+function buildSummary() {
+  if (!db.orders.length) return '🐱 ยังไม่มีออเดอร์ในตอนนี้';
+  const lines = db.orders.map((o, i) => {
+    const sum = (o.price * o.qty).toLocaleString('th-TH');
+    return `${i + 1}. ${o.name} x${o.qty} = ${sum}฿` + (o.person ? ` (${o.person})` : '');
+  });
+  const total = db.orders.reduce((a, o) => a + o.price * o.qty, 0);
+  const people = new Set(db.orders.map(o => o.person || '-')).size;
+  const when = new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+  return `🐱 สรุปออเดอร์อาหาร\n${when}\n\n` + lines.join('\n') +
+    `\n\n💰 รวมทั้งหมด: ${total.toLocaleString('th-TH')} บาท\n📋 ${db.orders.length} รายการ • ${people} คน`;
+}
+
+async function pushLine(text) {
+  const token = process.env.LINE_TOKEN;
+  if (!token) return { ok: false, error: 'ยังไม่ได้ตั้งค่า LINE_TOKEN ใน Render' };
+  const to = process.env.LINE_TARGET || db.lineTarget;
+  if (!to) return { ok: false, error: 'ยังไม่ได้เชื่อมปลายทาง — เพิ่มบอทเข้ากลุ่ม/ทักแชทกับ OA ก่อน 1 ครั้ง' };
+  try {
+    const r = await fetch(LINE_PUSH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ to, messages: [{ type: 'text', text }] })
+    });
+    if (!r.ok) return { ok: false, error: 'LINE API ' + r.status + ': ' + (await r.text()) };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+async function replyLine(replyToken, text) {
+  const token = process.env.LINE_TOKEN;
+  if (!token || !replyToken) return;
+  try {
+    await fetch(LINE_REPLY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ replyToken, messages: [{ type: 'text', text }] })
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// Webhook ของ LINE — จับ id ปลายทางอัตโนมัติเมื่อมีคนทักหรือเพิ่มบอทเข้ากลุ่ม
+app.post('/line/webhook', (req, res) => {
+  const secret = process.env.LINE_SECRET;
+  if (secret && req.rawBody) {
+    const sig = crypto.createHmac('sha256', secret).update(req.rawBody).digest('base64');
+    if (sig !== req.get('x-line-signature')) return res.status(401).send('bad signature');
+  }
+  const events = (req.body && req.body.events) || [];
+  events.forEach(ev => {
+    const s = ev.source || {};
+    const id = s.groupId || s.roomId || s.userId;
+    if (id && id !== db.lineTarget) { db.lineTarget = id; saveDb(); }
+    if ((ev.type === 'message' || ev.type === 'join' || ev.type === 'follow') && ev.replyToken) {
+      replyLine(ev.replyToken, '✅ เชื่อมต่อ "ออเดอร์เหมียว" เรียบร้อย! กดปุ่มส่งสรุปจากหลังบ้านได้เลย 🐾');
+    }
+  });
+  res.status(200).send('ok');
+});
+
+// สถานะการตั้งค่า LINE (ให้หลังบ้านแสดงผล)
+app.get('/api/line/status', (req, res) =>
+  res.json({ hasToken: !!process.env.LINE_TOKEN, linked: !!(process.env.LINE_TARGET || db.lineTarget) }));
+
+// ส่งสรุปเข้า LINE (กดจากปุ่มหลังบ้าน)
+app.post('/api/line/summary', async (req, res) => {
+  const r = await pushLine(buildSummary());
+  if (r.ok) return res.json({ ok: true });
+  res.status(400).json(r);
 });
 
 // health check

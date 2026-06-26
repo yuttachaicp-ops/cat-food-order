@@ -42,9 +42,11 @@
     <div class="card">
       <h2>🧾 รายการทั้งหมด</h2>
       <div class="toolbar">
+        <button class="btn btn-green btn-sm" onclick="sendLine()" id="line-btn">📲 ส่งสรุปเข้าไลน์</button>
         <button class="btn btn-ghost btn-sm" onclick="exportTxt()">⬇️ Export</button>
         <button class="btn btn-del btn-sm" onclick="clearOrders()">🗑️ ล้างทั้งหมด</button>
       </div>
+      <p class="muted hide" id="line-status" style="margin:-4px 0 10px;"></p>
       <div style="overflow-x:auto;">
         <table>
           <thead><tr><th>รูป</th><th>อาหาร</th><th>ร้าน</th><th>คนสั่ง</th><th class="num">ราคา</th><th class="num">จำนวน</th><th class="num">รวม</th><th></th></tr></thead>
@@ -259,6 +261,26 @@ function refreshMenuOpts(){
 
 function zoom(src){const b=document.createElement('div'); b.className='lightbox'; b.innerHTML=`<img src="${src}">`; b.onclick=()=>b.remove(); document.body.appendChild(b);}
 
+// ---- LINE ----
+async function sendLine(){
+  if(!DB.orders.length){ toast('ยังไม่มีออเดอร์ให้ส่ง'); return; }
+  const btn=document.getElementById('line-btn'); btn.disabled=true; const old=btn.textContent; btn.textContent='กำลังส่ง…';
+  try{
+    const r=await fetch('/api/line/summary',{method:'POST'}); const d=await r.json();
+    if(r.ok) toast('ส่งสรุปเข้าไลน์แล้ว 🐱'); else { toast('ส่งไม่ได้'); alert('ส่งเข้าไลน์ไม่สำเร็จ:\n'+(d.error||'ไม่ทราบสาเหตุ')); }
+  }catch(e){ toast('ส่งไม่ได้'); }
+  btn.disabled=false; btn.textContent=old;
+}
+async function checkLine(){
+  try{
+    const s=await (await fetch('/api/line/status')).json();
+    const el=document.getElementById('line-status'); const btn=document.getElementById('line-btn');
+    if(!s.hasToken){ el.textContent='⚠️ ยังไม่ได้ตั้งค่า LINE — ดูวิธีในไฟล์ LINE_SETUP.md'; el.classList.remove('hide'); btn.style.opacity=.55; }
+    else if(!s.linked){ el.textContent='ℹ️ ตั้ง token แล้ว แต่ยังไม่ได้เชื่อมปลายทาง — ทักแชท OA หรือเพิ่มบอทเข้ากลุ่ม 1 ครั้ง'; el.classList.remove('hide'); }
+    else { el.classList.add('hide'); btn.style.opacity=1; }
+  }catch(e){}
+}
+
 function exportTxt(){
   let txt='สรุปออเดอร์อาหาร\n'+new Date().toLocaleString('th-TH')+'\n\n';
   DB.orders.forEach((o,i)=>{txt+=`${i+1}. ${o.name} x${o.qty} = ${(o.price*o.qty).toLocaleString('th-TH')} บาท`+(o.person?` (${o.person})`:'')+(o.shop?` [${shopName(o.shop)}]`:'')+'\n';});
@@ -282,8 +304,9 @@ document.getElementById('f-name').addEventListener('change',e=>{
   if(!pendingImg&&found.m.img){pendingImg=found.m.img; const p=document.getElementById('f-img-prev'); p.src=pendingImg; p.classList.remove('hide');}
 });
 
-load();
+load(); checkLine();
 setInterval(load, 5000);
+setInterval(checkLine, 15000);
 </script>
 </body>
 </html>
