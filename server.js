@@ -10,6 +10,11 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 const DATA_FILE = path.join(DATA_DIR, 'data.json');
 
+// ถ้าตั้ง MONGODB_URI จะเก็บข้อมูลถาวรใน MongoDB (ข้อมูลไม่หายเมื่อ deploy/พักตัว) ไม่ตั้งก็ใช้ไฟล์
+const MONGODB_URI = process.env.MONGODB_URI || '';
+let useMongo = !!MONGODB_URI;
+let mongoCol = null;
+
 app.use(express.json({ limit: '8mb', verify: (req, res, buf) => { req.rawBody = buf; } })); // เผื่อรูป base64 + เก็บ raw body ไว้ตรวจลายเซ็น LINE
 
 // กันไม่ให้เข้าถึงไฟล์ภายในเซิร์ฟเวอร์ผ่าน URL
@@ -32,6 +37,13 @@ function loadDb() {
 }
 let saveTimer = null;
 function saveDb() {
+  // เก็บลง MongoDB ถ้าเปิดใช้งาน
+  if (useMongo && mongoCol) {
+    mongoCol.updateOne({ _id: 'main' }, { $set: { data: db } }, { upsert: true })
+      .catch(e => console.error('บันทึก MongoDB ไม่สำเร็จ:', e.message));
+    return;
+  }
+  // ไม่งั้นเก็บลงไฟล์ (debounce)
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
@@ -41,7 +53,30 @@ function saveDb() {
   }, 120);
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-loadDb();
+
+// เลือกที่เก็บข้อมูลตอนเริ่มเซิร์ฟเวอร์
+async function initStore() {
+  if (useMongo) {
+    try {
+      const { MongoClient } = require('mongodb');
+      const client = new MongoClient(MONGODB_URI);
+      await client.connect();
+      mongoCol = client.db(process.env.MONGODB_DB || 'catfoodorder').collection('appdata');
+      const doc = await mongoCol.findOne({ _id: 'main' });
+      if (doc && doc.data) {
+        db = { shops: doc.data.shops || [], orders: doc.data.orders || [], lineTarget: doc.data.lineTarget || '' };
+      } else {
+        await mongoCol.updateOne({ _id: 'main' }, { $set: { data: db } }, { upsert: true });
+      }
+      console.log('✅ เก็บข้อมูลถาวรด้วย MongoDB');
+    } catch (e) {
+      console.error('เชื่อม MongoDB ไม่สำเร็จ ใช้ไฟล์แทน:', e.message);
+      useMongo = false; loadDb();
+    }
+  } else {
+    loadDb();
+  }
+}
 
 // ---------- helpers ----------
 const findShop = id => db.shops.find(s => s.id === id);
@@ -241,4 +276,6 @@ app.post('/api/line/summary', async (req, res) => {
 // health check
 app.get('/healthz', (req, res) => res.send('ok'));
 
-app.listen(PORT, () => console.log(`🐱 เซิร์ฟเวอร์ทำงานที่พอร์ต ${PORT}`));
+initStore().then(() => {
+  app.listen(PORT, () => console.log(`🐱 เซิร์ฟเวอร์ทำงานที่พอร์ต ${PORT}`));
+});
