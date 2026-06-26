@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>สั่งอาหาร 🐱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="modelink" href="admin.html">⚙️ หลังบ้าน</a>
+  <span class="cat">🐱</span>
+  <h1>ออเดอร์เหมียว ~ สั่งของกิน</h1>
+  <p><span id="conn" class="status-dot"></span><span id="conn-txt">กำลังเชื่อมต่อ…</span> 🐾</p>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <label>ชื่อของคุณ (ผู้สั่ง)</label>
+    <input id="me" placeholder="พิมพ์ชื่อคุณ เช่น ต้น" autocomplete="off">
+    <p class="muted" style="margin:6px 0 0;">ใส่ชื่อครั้งเดียว แล้วกดสั่งเมนูที่อยากได้ด้านล่างได้เลย 🐾</p>
+  </div>
+
+  <div class="card">
+    <h2>🍽️ เมนูจากร้านค้า</h2>
+    <div id="shops"></div>
+  </div>
+
+  <div class="card">
+    <h2>➕ สั่งเมนูอื่น (ไม่มีในลิสต์)</h2>
+    <div class="grid g3">
+      <div><label>ชื่ออาหาร</label><input id="c-name" placeholder="เช่น ชานมไข่มุก"></div>
+      <div><label>ราคา (บาท)</label><input id="c-price" type="number" min="0" placeholder="0"></div>
+      <div><label>จำนวน</label><input id="c-qty" type="number" min="1" value="1"></div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:12px;" onclick="orderCustom()">สั่งรายการนี้</button>
+  </div>
+
+  <div class="card">
+    <h2>🧾 รายการที่สั่งแล้ว (รวมทุกคน)</h2>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>อาหาร</th><th>คนสั่ง</th><th class="num">จำนวน</th><th class="num">รวม</th></tr></thead>
+        <tbody id="orders"></tbody>
+      </table>
+    </div>
+    <div class="total-bar"><span class="lbl">💰 รวมทั้งหมด</span><span class="amt" id="total">0 บาท</span></div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const baht = n => Number(n).toLocaleString('th-TH') + ' บาท';
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let DB = { shops: [], orders: [] };
+
+const meEl = document.getElementById('me');
+meEl.value = localStorage.getItem('myname') || '';
+meEl.addEventListener('input', () => localStorage.setItem('myname', meEl.value.trim()));
+
+function toast(msg){const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800);}
+function setConn(ok){const d=document.getElementById('conn'),t=document.getElementById('conn-txt'); d.className='status-dot'+(ok?'':' off'); t.textContent=ok?'เชื่อมต่อแล้ว':'เชื่อมต่อไม่ได้';}
+
+async function load(){
+  try{
+    const r = await fetch('/api/data'); DB = await r.json(); setConn(true);
+    renderShops(); renderOrders();
+  }catch(e){ setConn(false); }
+}
+
+function shopName(id){const s=DB.shops.find(s=>s.id===id); return s?s.name:'';}
+
+function renderShops(){
+  const el = document.getElementById('shops');
+  if(!DB.shops.length || !DB.shops.some(s=>s.menu.length)){
+    el.innerHTML='<div class="empty">ยังไม่มีเมนู — ให้หลังบ้านเพิ่มร้านและเมนูก่อนนะ 🐾</div>'; return;
+  }
+  el.innerHTML = DB.shops.filter(s=>s.menu.length).map(s=>`
+    <div class="shop-block">
+      <p class="shop-title">🏪 ${esc(s.name)}</p>
+      ${s.phone?`<p class="shop-contact">📞 <a href="tel:${esc(s.phone)}">${esc(s.phone)}</a></p>`:''}
+      <div class="menu-grid">
+        ${s.menu.map(m=>`
+          <div class="dish">
+            ${m.img?`<img class="pic" src="${m.img}" onclick="zoom('${m.img}')">`:'<div class="pic-ph">🍜</div>'}
+            <div class="body">
+              <span class="dn">${esc(m.name)}</span>
+              <span class="dp">${m.price.toLocaleString('th-TH')} ฿</span>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="number" min="1" value="1" id="q-${m.id}" style="width:60px;padding:7px;">
+                <button class="btn btn-primary btn-sm" style="flex:1;" onclick="orderDish('${s.id}','${m.id}')">+ สั่ง</button>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function renderOrders(){
+  const tb = document.getElementById('orders');
+  if(!DB.orders.length){ tb.innerHTML='<tr><td colspan="4" class="empty">ยังไม่มีใครสั่ง</td></tr>'; }
+  else{
+    tb.innerHTML = DB.orders.map(o=>`<tr>
+      <td><b>${esc(o.name)}</b>${o.shop?` <span class="pill">${esc(shopName(o.shop))}</span>`:''}</td>
+      <td>${o.person?esc(o.person):'<span class="muted">—</span>'}</td>
+      <td class="num">${o.qty}</td>
+      <td class="num"><b>${(o.price*o.qty).toLocaleString('th-TH')}</b></td>
+    </tr>`).join('');
+  }
+  document.getElementById('total').textContent = baht(DB.orders.reduce((a,o)=>a+o.price*o.qty,0));
+}
+
+async function postOrder(payload){
+  const me = meEl.value.trim();
+  if(!me){ toast('กรุณาใส่ชื่อของคุณก่อน 🐾'); meEl.focus(); return false; }
+  payload.person = me;
+  try{
+    const r = await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!r.ok) throw 0;
+    await load(); toast('สั่งเรียบร้อย! 🐱'); return true;
+  }catch(e){ toast('ส่งคำสั่งไม่สำเร็จ ลองใหม่อีกครั้ง'); return false; }
+}
+
+function orderDish(shopId, menuId){
+  const s = DB.shops.find(s=>s.id===shopId); if(!s) return;
+  const m = s.menu.find(m=>m.id===menuId); if(!m) return;
+  const qty = parseInt(document.getElementById('q-'+menuId).value)||1;
+  postOrder({ name:m.name, price:m.price, qty, shop:shopId, img:m.img });
+}
+
+async function orderCustom(){
+  const name=document.getElementById('c-name').value.trim();
+  const price=parseFloat(document.getElementById('c-price').value)||0;
+  const qty=parseInt(document.getElementById('c-qty').value)||1;
+  if(!name){ toast('กรุณากรอกชื่ออาหาร'); return; }
+  const ok = await postOrder({ name, price, qty, shop:'' });
+  if(ok){ document.getElementById('c-name').value=''; document.getElementById('c-price').value=''; document.getElementById('c-qty').value='1'; }
+}
+
+function zoom(src){const b=document.createElement('div'); b.className='lightbox'; b.innerHTML=`<img src="${src}">`; b.onclick=()=>b.remove(); document.body.appendChild(b);}
+
+load();
+setInterval(load, 5000); // sync อัตโนมัติทุก 5 วิ
+</script>
+</body>
+</html>

@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>หลังบ้าน 🐱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <a class="modelink" href="index.html">🍽️ หน้าสั่ง</a>
+  <span class="cat">🐱</span>
+  <h1>หลังบ้าน ~ จัดการออเดอร์</h1>
+  <p><span id="conn" class="status-dot"></span><span id="conn-txt">กำลังเชื่อมต่อ…</span> 🐾</p>
+</header>
+
+<div class="wrap">
+  <div class="tabs">
+    <button class="tab active" data-tab="orders">🧾 ออเดอร์</button>
+    <button class="tab" data-tab="summary">📊 สรุป</button>
+    <button class="tab" data-tab="shops">🏪 ร้าน & เมนู</button>
+  </div>
+
+  <!-- ORDERS -->
+  <section id="t-orders">
+    <div class="card">
+      <h2>➕ เพิ่มรายการเอง</h2>
+      <div class="grid g4">
+        <div><label>ชื่ออาหาร</label><input id="f-name" list="menu-opts" placeholder="เช่น ข้าวกะเพรา"><datalist id="menu-opts"></datalist></div>
+        <div><label>คนสั่ง</label><input id="f-person" placeholder="ชื่อผู้สั่ง"></div>
+        <div><label>ราคา/ชิ้น</label><input id="f-price" type="number" min="0" placeholder="0"></div>
+        <div><label>จำนวน</label><input id="f-qty" type="number" min="1" value="1"></div>
+      </div>
+      <div class="grid g3" style="margin-top:12px;">
+        <div><label>ร้าน</label><select id="f-shop"><option value="">— ไม่ระบุ —</option></select></div>
+        <div><label>รูป (ไม่บังคับ)</label><input id="f-img" type="file" accept="image/*"></div>
+        <div style="display:flex;align-items:flex-end;"><button class="btn btn-primary" style="width:100%;" onclick="addOrder()">เพิ่ม</button></div>
+      </div>
+      <img id="f-img-prev" class="thumb-preview hide">
+    </div>
+
+    <div class="card">
+      <h2>🧾 รายการทั้งหมด</h2>
+      <div class="toolbar">
+        <button class="btn btn-ghost btn-sm" onclick="exportTxt()">⬇️ Export</button>
+        <button class="btn btn-del btn-sm" onclick="clearOrders()">🗑️ ล้างทั้งหมด</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>รูป</th><th>อาหาร</th><th>ร้าน</th><th>คนสั่ง</th><th class="num">ราคา</th><th class="num">จำนวน</th><th class="num">รวม</th><th></th></tr></thead>
+          <tbody id="orders-body"></tbody>
+        </table>
+      </div>
+      <div class="total-bar"><span class="lbl">💰 รวมทั้งหมด</span><span class="amt" id="grand-total">0 บาท</span></div>
+    </div>
+  </section>
+
+  <!-- SUMMARY -->
+  <section id="t-summary" class="hide">
+    <div class="card"><h2>📊 ภาพรวม</h2>
+      <div class="summary-grid">
+        <div class="stat"><div class="v" id="s-items">0</div><div class="k">จำนวนรายการ</div></div>
+        <div class="stat"><div class="v" id="s-qty">0</div><div class="k">จำนวนของ</div></div>
+        <div class="stat"><div class="v" id="s-people">0</div><div class="k">จำนวนคน</div></div>
+        <div class="stat"><div class="v" style="color:var(--green-d)" id="s-total">0 ฿</div><div class="k">ยอดรวม</div></div>
+      </div>
+    </div>
+    <div class="card"><h2>👥 ยอดต่อคน</h2><div id="per-person"></div></div>
+    <div class="card"><h2>🍜 ยอดต่อร้าน</h2><div id="per-shop"></div></div>
+  </section>
+
+  <!-- SHOPS -->
+  <section id="t-shops" class="hide">
+    <div class="card">
+      <h2>➕ เพิ่มร้านค้า</h2>
+      <div class="grid g2">
+        <div><label>ชื่อร้าน</label><input id="sh-name" placeholder="เช่น ร้านป้าแดง"></div>
+        <div><label>เบอร์โทร</label><input id="sh-phone" placeholder="08x-xxx-xxxx"></div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="addShop()">เพิ่มร้าน</button>
+    </div>
+    <div class="card"><h2>🏪 ร้านค้าทั้งหมด</h2><div id="shops-list"></div></div>
+  </section>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const baht = n => Number(n).toLocaleString('th-TH') + ' บาท';
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let DB = { shops: [], orders: [] };
+let pendingImg = '';
+
+function toast(m){const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800);}
+function setConn(ok){const d=document.getElementById('conn'),t=document.getElementById('conn-txt'); d.className='status-dot'+(ok?'':' off'); t.textContent=ok?'เชื่อมต่อแล้ว':'เชื่อมต่อไม่ได้';}
+
+// ---- API helpers ----
+async function api(method, url, body){
+  const opt={method, headers:{'Content-Type':'application/json'}};
+  if(body) opt.body=JSON.stringify(body);
+  const r=await fetch(url,opt);
+  if(!r.ok) throw new Error('API '+r.status);
+  return r.json();
+}
+async function load(){
+  try{ DB=await api('GET','/api/data'); setConn(true); renderAll(); }
+  catch(e){ setConn(false); }
+}
+function renderAll(){ renderOrders(); refreshShopSelect(); refreshMenuOpts(); renderShops(); if(!document.getElementById('t-summary').classList.contains('hide')) renderSummary(); }
+
+// ---- tabs ----
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); t.classList.add('active');
+  ['orders','summary','shops'].forEach(id=>document.getElementById('t-'+id).classList.add('hide'));
+  document.getElementById('t-'+t.dataset.tab).classList.remove('hide');
+  if(t.dataset.tab==='summary') renderSummary();
+});
+
+const shopName = id => { const s=DB.shops.find(s=>s.id===id); return s?s.name:''; };
+
+// ---- ORDERS ----
+async function addOrder(){
+  const name=document.getElementById('f-name').value.trim();
+  if(!name){ toast('กรุณากรอกชื่ออาหาร'); return; }
+  const body={ name, person:document.getElementById('f-person').value.trim(),
+    price:parseFloat(document.getElementById('f-price').value)||0,
+    qty:parseInt(document.getElementById('f-qty').value)||1,
+    shop:document.getElementById('f-shop').value, img:pendingImg };
+  try{
+    await api('POST','/api/orders',body);
+    document.getElementById('f-name').value=''; document.getElementById('f-price').value='';
+    document.getElementById('f-qty').value='1'; document.getElementById('f-img').value='';
+    pendingImg=''; document.getElementById('f-img-prev').classList.add('hide');
+    await load(); toast('เพิ่มแล้ว 🐱');
+  }catch(e){ toast('เพิ่มไม่สำเร็จ'); }
+}
+async function delOrder(id){ if(!confirm('ลบรายการนี้?'))return; await api('DELETE','/api/orders/'+id); load(); }
+async function clearOrders(){ if(!confirm('ล้างรายการสั่งทั้งหมด?'))return; await api('DELETE','/api/orders'); load(); }
+async function editOrder(id){
+  const o=DB.orders.find(o=>o.id===id); if(!o)return;
+  const name=prompt('ชื่ออาหาร:', o.name); if(name===null)return;
+  const price=prompt('ราคา/ชิ้น:', o.price); if(price===null)return;
+  const qty=prompt('จำนวน:', o.qty); if(qty===null)return;
+  const person=prompt('คนสั่ง:', o.person); if(person===null)return;
+  await api('PUT','/api/orders/'+id,{name:name.trim(),price,qty,person:person.trim()}); load();
+}
+
+function renderOrders(){
+  const tb=document.getElementById('orders-body');
+  if(!DB.orders.length){ tb.innerHTML='<tr><td colspan="8" class="empty">ยังไม่มีรายการสั่ง</td></tr>'; }
+  else{
+    tb.innerHTML=DB.orders.map(o=>`<tr>
+      <td>${o.img?`<img class="thumb" src="${o.img}" onclick="zoom('${o.img}')">`:'<div class="thumb-ph">🍽️</div>'}</td>
+      <td><b>${esc(o.name)}</b></td>
+      <td>${o.shop?'<span class="pill">'+esc(shopName(o.shop))+'</span>':'<span class="muted">—</span>'}</td>
+      <td>${o.person?esc(o.person):'<span class="muted">—</span>'}</td>
+      <td class="num">${o.price.toLocaleString('th-TH')}</td>
+      <td class="num">${o.qty}</td>
+      <td class="num"><b>${(o.price*o.qty).toLocaleString('th-TH')}</b></td>
+      <td class="num"><div style="display:flex;gap:4px;justify-content:flex-end;">
+        <button class="btn btn-ghost btn-sm" onclick="editOrder('${o.id}')">แก้</button>
+        <button class="btn btn-del btn-sm" onclick="delOrder('${o.id}')">ลบ</button></div></td>
+    </tr>`).join('');
+  }
+  document.getElementById('grand-total').textContent=baht(DB.orders.reduce((a,o)=>a+o.price*o.qty,0));
+}
+
+// ---- SUMMARY ----
+function renderSummary(){
+  const total=DB.orders.reduce((a,o)=>a+o.price*o.qty,0);
+  document.getElementById('s-items').textContent=DB.orders.length;
+  document.getElementById('s-qty').textContent=DB.orders.reduce((a,o)=>a+o.qty,0);
+  document.getElementById('s-people').textContent=new Set(DB.orders.map(o=>o.person||'(ไม่ระบุ)')).size;
+  document.getElementById('s-total').textContent=total.toLocaleString('th-TH')+' ฿';
+  const byP={}; DB.orders.forEach(o=>{const k=o.person||'(ไม่ระบุชื่อ)'; byP[k]=(byP[k]||0)+o.price*o.qty;});
+  const byS={}; DB.orders.forEach(o=>{const k=o.shop?shopName(o.shop):'(ไม่ระบุร้าน)'; byS[k]=(byS[k]||0)+o.price*o.qty;});
+  const rows=obj=>{const ks=Object.keys(obj); return ks.length?ks.sort((a,b)=>obj[b]-obj[a]).map(k=>`<div class="person-row"><span>${esc(k)}</span><b>${baht(obj[k])}</b></div>`).join(''):'<div class="empty">ยังไม่มีข้อมูล</div>';};
+  document.getElementById('per-person').innerHTML=rows(byP);
+  document.getElementById('per-shop').innerHTML=rows(byS);
+}
+
+// ---- SHOPS / MENU ----
+async function addShop(){
+  const name=document.getElementById('sh-name').value.trim();
+  if(!name){ toast('กรุณากรอกชื่อร้าน'); return; }
+  await api('POST','/api/shops',{name, phone:document.getElementById('sh-phone').value.trim()});
+  document.getElementById('sh-name').value=''; document.getElementById('sh-phone').value=''; load();
+}
+async function delShop(id){ if(!confirm('ลบร้านนี้และเมนูทั้งหมด?'))return; await api('DELETE','/api/shops/'+id); load(); }
+async function editShop(id){
+  const s=DB.shops.find(s=>s.id===id); if(!s)return;
+  const name=prompt('ชื่อร้าน:',s.name); if(name===null)return;
+  const phone=prompt('เบอร์โทร:',s.phone||''); if(phone===null)return;
+  await api('PUT','/api/shops/'+id,{name:name.trim(),phone:phone.trim()}); load();
+}
+function compressImg(file, max=400, q=0.72){
+  return new Promise(resolve=>{
+    if(!file){resolve('');return;}
+    const r=new FileReader();
+    r.onload=e=>{const img=new Image(); img.onload=()=>{let w=img.width,h=img.height;
+      if(w>h){if(w>max){h=Math.round(h*max/w);w=max;}}else{if(h>max){w=Math.round(w*max/h);h=max;}}
+      const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(img,0,0,w,h);
+      resolve(c.toDataURL('image/jpeg',q));}; img.onerror=()=>resolve(''); img.src=e.target.result;};
+    r.onerror=()=>resolve(''); r.readAsDataURL(file);
+  });
+}
+async function addMenu(id){
+  const nEl=document.getElementById('m-name-'+id), pEl=document.getElementById('m-price-'+id), iEl=document.getElementById('m-img-'+id);
+  const name=nEl.value.trim(); if(!name){ toast('กรุณากรอกชื่อเมนู'); return; }
+  const img=await compressImg(iEl&&iEl.files[0]);
+  await api('POST','/api/shops/'+id+'/menu',{name, price:parseFloat(pEl.value)||0, img});
+  nEl.value=''; pEl.value=''; if(iEl)iEl.value=''; load();
+}
+async function delMenu(sid,mid){ await api('DELETE','/api/shops/'+sid+'/menu/'+mid); load(); }
+async function editMenu(sid,mid){
+  const s=DB.shops.find(s=>s.id===sid); const m=s&&s.menu.find(m=>m.id===mid); if(!m)return;
+  const name=prompt('ชื่อเมนู:',m.name); if(name===null)return;
+  const price=prompt('ราคา:',m.price); if(price===null)return;
+  await api('PUT','/api/shops/'+sid+'/menu/'+mid,{name:name.trim(),price}); load();
+}
+
+function renderShops(){
+  const el=document.getElementById('shops-list');
+  if(!DB.shops.length){ el.innerHTML='<div class="empty">ยังไม่มีร้านค้า — เพิ่มด้านบนได้เลย</div>'; return; }
+  el.innerHTML=DB.shops.map(s=>`
+    <div class="shop-card">
+      <div class="shop-head">
+        <div><p style="font-size:16px;font-weight:700;margin:0;">🏪 ${esc(s.name)}</p>
+          <p style="color:var(--blue);font-size:13px;margin:2px 0 0;font-weight:600;">📞 ${s.phone?'<a href="tel:'+esc(s.phone)+'">'+esc(s.phone)+'</a>':'<span class="muted">ไม่มีเบอร์</span>'}</p></div>
+        <div style="display:flex;gap:4px;">
+          <button class="btn btn-ghost btn-sm" onclick="editShop('${s.id}')">แก้</button>
+          <button class="btn btn-del btn-sm" onclick="delShop('${s.id}')">ลบร้าน</button></div>
+      </div>
+      <ul class="menu-list">
+        ${s.menu.length?s.menu.map(m=>`<li class="menu-item">
+          ${m.img?`<img class="menu-thumb" src="${m.img}" onclick="zoom('${m.img}')">`:''}
+          <span class="mname">${esc(m.name)} <b>${m.price.toLocaleString('th-TH')}฿</b></span>
+          <span class="x" onclick="editMenu('${s.id}','${m.id}')" style="color:#9a8bb0;">✎</span>
+          <span class="x" onclick="delMenu('${s.id}','${m.id}')">✕</span></li>`).join(''):'<li class="muted">ยังไม่มีเมนู</li>'}
+      </ul>
+      <div class="grid g4" style="margin-top:12px;">
+        <input id="m-name-${s.id}" placeholder="ชื่อเมนู">
+        <input id="m-price-${s.id}" type="number" min="0" placeholder="ราคา">
+        <input id="m-img-${s.id}" type="file" accept="image/*">
+        <button class="btn btn-ghost btn-sm" onclick="addMenu('${s.id}')">+ เพิ่มเมนู</button>
+      </div>
+    </div>`).join('');
+}
+function refreshShopSelect(){
+  const sel=document.getElementById('f-shop'); const cur=sel.value;
+  sel.innerHTML='<option value="">— ไม่ระบุ —</option>'+DB.shops.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  sel.value=cur;
+}
+function refreshMenuOpts(){
+  const dl=document.getElementById('menu-opts'); const items=[];
+  DB.shops.forEach(s=>s.menu.forEach(m=>items.push(m.name)));
+  dl.innerHTML=[...new Set(items)].map(n=>`<option value="${esc(n)}">`).join('');
+}
+
+function zoom(src){const b=document.createElement('div'); b.className='lightbox'; b.innerHTML=`<img src="${src}">`; b.onclick=()=>b.remove(); document.body.appendChild(b);}
+
+function exportTxt(){
+  let txt='สรุปออเดอร์อาหาร\n'+new Date().toLocaleString('th-TH')+'\n\n';
+  DB.orders.forEach((o,i)=>{txt+=`${i+1}. ${o.name} x${o.qty} = ${(o.price*o.qty).toLocaleString('th-TH')} บาท`+(o.person?` (${o.person})`:'')+(o.shop?` [${shopName(o.shop)}]`:'')+'\n';});
+  txt+=`\nรวมทั้งหมด: ${DB.orders.reduce((a,o)=>a+o.price*o.qty,0).toLocaleString('th-TH')} บาท`;
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain;charset=utf-8'})); a.download='สรุปออเดอร์.txt'; a.click();
+}
+
+// image preview for manual add
+document.getElementById('f-img').addEventListener('change',async e=>{
+  pendingImg=await compressImg(e.target.files[0]);
+  const p=document.getElementById('f-img-prev');
+  if(pendingImg){p.src=pendingImg; p.classList.remove('hide');}else{p.classList.add('hide');}
+});
+// auto-fill price/img from menu
+document.getElementById('f-name').addEventListener('change',e=>{
+  const name=e.target.value.trim().toLowerCase(); if(!name)return; let found=null;
+  DB.shops.forEach(s=>s.menu.forEach(m=>{if(m.name.trim().toLowerCase()===name)found={m,s};}));
+  if(!found)return;
+  const pe=document.getElementById('f-price'); if(!pe.value&&found.m.price)pe.value=found.m.price;
+  if(!document.getElementById('f-shop').value)document.getElementById('f-shop').value=found.s.id;
+  if(!pendingImg&&found.m.img){pendingImg=found.m.img; const p=document.getElementById('f-img-prev'); p.src=pendingImg; p.classList.remove('hide');}
+});
+
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>
