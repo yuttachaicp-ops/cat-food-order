@@ -155,15 +155,29 @@ const LINE_REPLY = 'https://api.line.me/v2/bot/message/reply';
 
 function buildSummary() {
   if (!db.orders.length) return '🐱 ยังไม่มีออเดอร์ในตอนนี้';
-  const lines = db.orders.map((o, i) => {
-    const sum = (o.price * o.qty).toLocaleString('th-TH');
-    return `${i + 1}. ${o.name} x${o.qty} = ${sum}฿` + (o.person ? ` (${o.person})` : '');
+  const shopName = id => { const s = db.shops.find(s => s.id === id); return s ? s.name : ''; };
+  const shopPhone = id => { const s = db.shops.find(s => s.id === id); return s ? s.phone : ''; };
+  // จัดกลุ่มตามร้าน -> เมนู (รวมจำนวนชิ้น + ราคา)
+  const groups = {};
+  db.orders.forEach(o => {
+    const key = o.shop || '__none__';
+    if (!groups[key]) groups[key] = { name: o.shop ? shopName(o.shop) : '(ไม่ระบุร้าน)', phone: o.shop ? shopPhone(o.shop) : '', items: {}, qty: 0, sum: 0 };
+    const it = groups[key].items[o.name] || (groups[key].items[o.name] = { qty: 0, sum: 0 });
+    it.qty += o.qty; it.sum += o.price * o.qty;
+    groups[key].qty += o.qty; groups[key].sum += o.price * o.qty;
   });
   const total = db.orders.reduce((a, o) => a + o.price * o.qty, 0);
+  const totalQty = db.orders.reduce((a, o) => a + o.qty, 0);
   const people = new Set(db.orders.map(o => o.person || '-')).size;
   const when = new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
-  return `🐱 สรุปออเดอร์อาหาร\n${when}\n\n` + lines.join('\n') +
-    `\n\n💰 รวมทั้งหมด: ${total.toLocaleString('th-TH')} บาท\n📋 ${db.orders.length} รายการ • ${people} คน`;
+  const body = Object.keys(groups).sort((a, b) => groups[b].sum - groups[a].sum).map(k => {
+    const g = groups[k];
+    let block = `🏪 ${g.name}` + (g.phone ? ` (โทร ${g.phone})` : '') + '\n';
+    block += Object.keys(g.items).map(n => `  • ${n} x${g.items[n].qty} = ${g.items[n].sum.toLocaleString('th-TH')}฿`).join('\n');
+    block += `\n  รวมร้าน: ${g.qty} ชิ้น = ${g.sum.toLocaleString('th-TH')} บาท`;
+    return block;
+  }).join('\n\n');
+  return `🐱 สรุปออเดอร์อาหาร\n${when}\n\n${body}\n\n━━━━━━━━\n💰 รวมทั้งหมด: ${total.toLocaleString('th-TH')} บาท\n📋 ${totalQty} ชิ้น • ${people} คน`;
 }
 
 async function pushLine(text) {

@@ -108,7 +108,14 @@ async function load(){
   try{ DB=await api('GET','/api/data'); setConn(true); renderAll(); }
   catch(e){ setConn(false); }
 }
-function renderAll(){ renderOrders(); refreshShopSelect(); refreshMenuOpts(); renderShops(); if(!document.getElementById('t-summary').classList.contains('hide')) renderSummary(); }
+let lastShopsJSON='';
+function renderAll(){
+  renderOrders();
+  // รีเฟรชรายการร้าน/เมนูเฉพาะตอนข้อมูลร้านเปลี่ยนจริง เพื่อไม่ให้ช่องที่กำลังพิมพ์เมนูถูกล้างทุก 5 วิ
+  const sj=JSON.stringify(DB.shops);
+  if(sj!==lastShopsJSON){ lastShopsJSON=sj; refreshShopSelect(); refreshMenuOpts(); renderShops(); }
+  if(!document.getElementById('t-summary').classList.contains('hide')) renderSummary();
+}
 
 // ---- tabs ----
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
@@ -175,10 +182,22 @@ function renderSummary(){
   document.getElementById('s-people').textContent=new Set(DB.orders.map(o=>o.person||'(ไม่ระบุ)')).size;
   document.getElementById('s-total').textContent=total.toLocaleString('th-TH')+' ฿';
   const byP={}; DB.orders.forEach(o=>{const k=o.person||'(ไม่ระบุชื่อ)'; byP[k]=(byP[k]||0)+o.price*o.qty;});
-  const byS={}; DB.orders.forEach(o=>{const k=o.shop?shopName(o.shop):'(ไม่ระบุร้าน)'; byS[k]=(byS[k]||0)+o.price*o.qty;});
   const rows=obj=>{const ks=Object.keys(obj); return ks.length?ks.sort((a,b)=>obj[b]-obj[a]).map(k=>`<div class="person-row"><span>${esc(k)}</span><b>${baht(obj[k])}</b></div>`).join(''):'<div class="empty">ยังไม่มีข้อมูล</div>';};
   document.getElementById('per-person').innerHTML=rows(byP);
-  document.getElementById('per-shop').innerHTML=rows(byS);
+  // per-shop: แตกเป็นเมนู + จำนวนชิ้น + ราคา + รวมร้าน
+  const shops={};
+  DB.orders.forEach(o=>{
+    const key=o.shop||'__none__';
+    if(!shops[key]){ const sh=DB.shops.find(x=>x.id===o.shop); shops[key]={name:o.shop?shopName(o.shop):'(ไม่ระบุร้าน)', phone:sh?sh.phone:'', items:{}, qty:0, sum:0}; }
+    const it=shops[key].items[o.name]||(shops[key].items[o.name]={qty:0,sum:0});
+    it.qty+=o.qty; it.sum+=o.price*o.qty; shops[key].qty+=o.qty; shops[key].sum+=o.price*o.qty;
+  });
+  const sk=Object.keys(shops);
+  document.getElementById('per-shop').innerHTML = sk.length ? sk.sort((a,b)=>shops[b].sum-shops[a].sum).map(k=>{
+    const s=shops[k];
+    const items=Object.keys(s.items).map(n=>`<div class="person-row" style="padding:5px 0;"><span>• ${esc(n)} <b>x${s.items[n].qty}</b></span><span>${s.items[n].sum.toLocaleString('th-TH')}฿</span></div>`).join('');
+    return `<div style="margin-bottom:16px;"><div style="font-weight:700;margin-bottom:2px;">🏪 ${esc(s.name)}${s.phone?` <a href="tel:${esc(s.phone)}" class="muted" style="font-weight:400;">📞 ${esc(s.phone)}</a>`:''}</div>${items}<div class="person-row" style="border-top:1px dashed var(--line);"><b>รวมร้าน</b><b style="color:var(--green-d);">${s.qty} ชิ้น • ${s.sum.toLocaleString('th-TH')} บาท</b></div></div>`;
+  }).join('') : '<div class="empty">ยังไม่มีข้อมูล</div>';
 }
 
 // ---- SHOPS / MENU ----
