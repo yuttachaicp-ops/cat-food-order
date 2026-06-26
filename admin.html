@@ -233,6 +233,14 @@ async function addMenu(id){
   nEl.value=''; pEl.value=''; if(iEl)iEl.value=''; load();
 }
 async function delMenu(sid,mid){ await api('DELETE','/api/shops/'+sid+'/menu/'+mid); load(); }
+async function setMenuImg(sid,mid,input){
+  const file=input.files&&input.files[0]; if(!file)return;
+  toast('กำลังอัปโหลดรูป…');
+  const img=await compressImg(file);
+  if(!img){ toast('อ่านรูปไม่ได้'); return; }
+  try{ await api('PUT','/api/shops/'+sid+'/menu/'+mid,{img}); toast('เพิ่มรูปแล้ว 🐱'); load(); }
+  catch(e){ toast('เพิ่มรูปไม่สำเร็จ'); }
+}
 async function editMenu(sid,mid){
   const s=DB.shops.find(s=>s.id===sid); const m=s&&s.menu.find(m=>m.id===mid); if(!m)return;
   const name=prompt('ชื่อเมนู:',m.name); if(name===null)return;
@@ -254,8 +262,9 @@ function renderShops(){
       </div>
       <ul class="menu-list">
         ${s.menu.length?s.menu.map(m=>`<li class="menu-item">
-          ${m.img?`<img class="menu-thumb" src="${m.img}" onclick="zoom('${m.img}')">`:''}
+          ${m.img?`<img class="menu-thumb" src="${m.img}" onclick="zoom('${m.img}')">`:'<span class="menu-thumb" style="display:flex;align-items:center;justify-content:center;color:#dcc9d6;">🍽️</span>'}
           <span class="mname">${esc(m.name)} <b>${m.price.toLocaleString('th-TH')}฿</b></span>
+          <label class="x" style="color:#7ba88a;cursor:pointer;" title="${m.img?'เปลี่ยนรูป':'เพิ่มรูป'}">${m.img?'🔄':'📷'}<input type="file" accept="image/*" style="display:none" onchange="setMenuImg('${s.id}','${m.id}',this)"></label>
           <span class="x" onclick="editMenu('${s.id}','${m.id}')" style="color:#9a8bb0;">✎</span>
           <span class="x" onclick="delMenu('${s.id}','${m.id}')">✕</span></li>`).join(''):'<li class="muted">ยังไม่มีเมนู</li>'}
       </ul>
